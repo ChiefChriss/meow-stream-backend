@@ -7,7 +7,7 @@ Vercel serverless API that resolves Vidking embed pages into direct `.m3u8` URLs
 ```
 GET /api/stream/movie/:tmdbId
 GET /api/stream/tv/:tmdbId/:season/:episode
-Authorization: Bearer <APP_SECRET>   # optional when APP_SECRET is unset
+Authorization: Bearer <APP_SECRET>   # required
 ```
 
 ## Local development
@@ -32,7 +32,7 @@ npm run test:resolve -- 1396 tv 1 1
 vercel
 ```
 
-Set `APP_SECRET` in the Vercel dashboard. Optionally configure Upstash Redis for caching resolved URLs.
+Set `APP_SECRET` and `BACKEND_PUBLIC_URL` in the Vercel dashboard. Optionally configure Upstash Redis for caching resolved URLs.
 
 ## How it works
 

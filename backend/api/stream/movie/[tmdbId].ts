@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { verifyAuth, unauthorized } from "../../../lib/auth";
 import { cacheKey, getCachedStream, setCachedStream } from "../../../lib/cache";
+import { getTrustedPublicOrigin } from "../../../lib/public-origin";
 import { resolveStream } from "../../../lib/vidking-resolver";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -24,14 +25,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const host = req.headers.host ?? "127.0.0.1:3000";
-    const protocol =
-      host.includes("localhost") || host.startsWith("127.0.0.1")
-        ? "http"
-        : "https";
     const stream = await resolveStream(
       { type: "movie", tmdbId },
-      `${protocol}://${host}`,
+      getTrustedPublicOrigin(),
     );
     await setCachedStream(key, stream);
     return res.status(200).json(stream);

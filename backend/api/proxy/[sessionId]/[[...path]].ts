@@ -1,5 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { fetchThroughSession, rewriteManifest } from "../../../lib/proxy-fetch";
+import { getTrustedPublicOrigin } from "../../../lib/public-origin";
+import { assertAllowedProxyUrl } from "../../../lib/proxy-url";
 import { getProxySession } from "../../../lib/proxy-session";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -23,11 +25,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? targetParam
       : session.upstreamUrl;
 
-  const host = req.headers.host ?? "127.0.0.1:3000";
-  const protocol = host.includes("localhost") || host.startsWith("127.0.0.1")
-    ? "http"
-    : "https";
-  const proxyBase = `${protocol}://${host}/api/proxy/${sessionId}`;
+  try {
+    assertAllowedProxyUrl(targetUrl, session);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Proxy URL not allowed";
+    return res.status(403).json({ error: message });
+  }
+
+  const proxyBase = `${getTrustedPublicOrigin()}/api/proxy/${sessionId}`;
 
   try {
     if (

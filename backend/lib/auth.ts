@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export function verifyAuth(req: VercelRequest): boolean {
   const secret = process.env.APP_SECRET;
-  if (!secret) return true;
+  if (!secret) return false;
 
   const auth = req.headers.authorization;
   if (!auth?.startsWith("Bearer ")) return false;

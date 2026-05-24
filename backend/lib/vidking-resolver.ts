@@ -1,4 +1,5 @@
 import type { ResolveParams, StreamResponse, SubtitleTrack } from "./types";
+import { getBrowser } from "./browser";
 import {
   buildProxyStreamUrl,
   createProxySession,
@@ -57,40 +58,16 @@ function buildResponse(
   };
 }
 
-async function launchBrowser() {
-  const { chromium } = await import("playwright-core");
-
-  if (process.env.VERCEL === "1") {
-    const chromiumPkg = await import("@sparticuz/chromium");
-    return chromium.launch({
-      args: chromiumPkg.default.args,
-      executablePath: await chromiumPkg.default.executablePath(),
-      headless: true,
-    });
-  }
-
-  // Local dev: use system Chrome. Cloud (Render, etc.): use Playwright's
-  // downloaded Chromium with sandbox disabled (required on Linux containers).
-  const isLocal = !process.env.RENDER && !process.env.CI;
-  if (isLocal) {
-    return chromium.launch({ channel: "chrome", headless: true });
-  }
-
-  return chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
-}
-
 async function resolveViaPlaywright(
   params: ResolveParams,
   publicOrigin?: string,
 ): Promise<StreamResponse | null> {
   const embedUrl = buildEmbedUrl(params);
-  const browser = await launchBrowser();
+  const browser = await getBrowser();
+  const context = await browser.newContext({ userAgent: USER_AGENT });
+  let keepContext = false;
 
   try {
-    const context = await browser.newContext({ userAgent: USER_AGENT });
     const page = await context.newPage();
 
     await page.route("**/*", (route) => {
@@ -148,6 +125,7 @@ async function resolveViaPlaywright(
       cachedManifest: capturedManifest,
     });
     bindSessionContext(session.id, context);
+    keepContext = true;
 
     const pageHtml = await page.content();
     const subtitles = [
@@ -170,8 +148,10 @@ async function resolveViaPlaywright(
       "playwright",
       session.id,
     );
-  } catch (error) {
-    throw error;
+  } finally {
+    if (!keepContext) {
+      await context.close().catch(() => undefined);
+    }
   }
 }
 

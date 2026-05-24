@@ -1,43 +1,14 @@
 import type { ProxySession } from "./proxy-session";
+import { getBrowser } from "./browser";
 import {
   disposeLiveContext,
   getLiveContext,
+  registerLiveContext,
 } from "./proxy-context";
+import { assertAllowedProxyUrl, recordManifestHostnames } from "./proxy-url";
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-let browserPromise: ReturnType<typeof launchBrowser> | null = null;
-
-async function launchBrowser() {
-  const { chromium } = await import("playwright-core");
-
-  if (process.env.VERCEL === "1") {
-    const chromiumPkg = await import("@sparticuz/chromium");
-    return chromium.launch({
-      args: chromiumPkg.default.args,
-      executablePath: await chromiumPkg.default.executablePath(),
-      headless: true,
-    });
-  }
-
-  const isLocal = !process.env.RENDER && !process.env.CI;
-  if (isLocal) {
-    return chromium.launch({ channel: "chrome", headless: true });
-  }
-
-  return chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
-}
-
-async function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = launchBrowser();
-  }
-  return browserPromise;
-}
 
 async function createContext(session: ProxySession) {
   const browser = await getBrowser();
@@ -46,6 +17,7 @@ async function createContext(session: ProxySession) {
     // Playwright's generated storage state is compatible at runtime.
     storageState: session.storageState as never,
   });
+  registerLiveContext(session.id, context);
   const page = await context.newPage();
   await page.goto(session.embedUrl, {
     waitUntil: "domcontentloaded",
@@ -64,28 +36,21 @@ export async function fetchThroughSession(
   session: ProxySession,
   targetUrl: string,
 ): Promise<{ body: Buffer; contentType: string }> {
+  assertAllowedProxyUrl(targetUrl, session);
+
   const context = await getContextForSession(session);
   const page = context.pages()[0] ?? (await context.newPage());
 
   try {
     const result = await page.evaluate(async (url) => {
-      const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("GET", url, true);
-        xhr.responseType = "arraybuffer";
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(xhr.response as ArrayBuffer);
-            return;
-          }
-          reject(new Error(`XHR failed: ${xhr.status}`));
-        };
-        xhr.onerror = () => reject(new Error("XHR network error"));
-        xhr.send();
-      });
-
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Fetch failed: ${response.status}`);
+      }
+      const buffer = await response.arrayBuffer();
       return {
-        contentType: "application/octet-stream",
+        contentType:
+          response.headers.get("content-type") ?? "application/octet-stream",
         body: Array.from(new Uint8Array(buffer)),
       };
     }, targetUrl);
@@ -105,6 +70,8 @@ export function rewriteManifest(
   session: ProxySession,
   proxyBase: string,
 ): string {
+  recordManifestHostnames(session, manifest, session.upstreamUrl);
+
   const baseUrl = session.upstreamUrl;
 
   return manifest
